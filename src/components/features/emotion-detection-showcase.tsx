@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import { Button } from "@/components/ui/button"
 import { motion, AnimatePresence } from "motion/react"
-import { Camera, Play, Pause, RotateCcw, Settings, AlertCircle, RefreshCw, Eye, EyeOff, Users, Sun, Moon } from "lucide-react"
+import { Camera, Play, Pause, RotateCcw, Settings, AlertCircle, RefreshCw } from "lucide-react"
 
 interface EmotionState {
   emotion: string
@@ -20,15 +20,6 @@ interface AdaptationResponse {
   emotion: string
   message: string
   actionType: "encourage" | "clarify" | "adjust" | "refocus"
-}
-
-interface CameraAlert {
-  type: "no-person" | "camera-blocked" | "low-light" | "multiple-people" | "camera-off" | "connection-lost"
-  title: string
-  message: string
-  icon: JSX.Element
-  severity: "warning" | "error" | "info"
-  color: string
 }
 
 const emotionStates: EmotionState[] = [
@@ -47,57 +38,6 @@ const adaptationResponses: AdaptationResponse[] = [
   { emotion: "Frustrated", message: "I understand this is challenging. Let's try a different approach.", actionType: "refocus" }
 ]
 
-const cameraAlerts: Record<string, CameraAlert> = {
-  "no-person": {
-    type: "no-person",
-    title: "No Person Detected",
-    message: "Please position yourself in front of the camera. Make sure your face is clearly visible and well-lit.",
-    icon: <Eye className="w-5 h-5" />,
-    severity: "warning",
-    color: "border-yellow-500 bg-yellow-50 text-yellow-800"
-  },
-  "camera-blocked": {
-    type: "camera-blocked",
-    title: "Camera Blocked",
-    message: "Camera appears to be covered or blocked. Please remove any obstructions and ensure proper lighting.",
-    icon: <EyeOff className="w-5 h-5" />,
-    severity: "error",
-    color: "border-red-500 bg-red-50 text-red-800"
-  },
-  "low-light": {
-    type: "low-light",
-    title: "Low Light Detected",
-    message: "Lighting conditions are too dim for accurate emotion detection. Please move to a brighter area.",
-    icon: <Moon className="w-5 h-5" />,
-    severity: "warning",
-    color: "border-blue-500 bg-blue-50 text-blue-800"
-  },
-  "multiple-people": {
-    type: "multiple-people",
-    title: "Multiple People Detected",
-    message: "Multiple faces detected. For best results, ensure only one person is visible in the camera frame.",
-    icon: <Users className="w-5 h-5" />,
-    severity: "info",
-    color: "border-purple-500 bg-purple-50 text-purple-800"
-  },
-  "camera-off": {
-    type: "camera-off",
-    title: "Camera Disconnected",
-    message: "Camera connection lost. Please check your camera connection and refresh the page.",
-    icon: <Camera className="w-5 h-5" />,
-    severity: "error",
-    color: "border-red-500 bg-red-50 text-red-800"
-  },
-  "connection-lost": {
-    type: "connection-lost",
-    title: "Connection Lost",
-    message: "Camera stream interrupted. Attempting to reconnect automatically.",
-    icon: <RefreshCw className="w-5 h-5" />,
-    severity: "error",
-    color: "border-orange-500 bg-orange-50 text-orange-800"
-  }
-}
-
 export default function EmotionDetectionShowcase() {
   const [isActive, setIsActive] = useState(false)
   const [emotions, setEmotions] = useState<EmotionState[]>(emotionStates)
@@ -106,20 +46,15 @@ export default function EmotionDetectionShowcase() {
   const [cameraError, setCameraError] = useState<string>("")
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null)
   const [isLoading, setIsLoading] = useState(false)
-  const [activeAlerts, setActiveAlerts] = useState<CameraAlert[]>([])
-  const [personDetected, setPersonDetected] = useState<boolean>(false)
-  const [lightLevel, setLightLevel] = useState<number>(50)
-  const [faceCount, setFaceCount] = useState<number>(0)
-  const [debugInfo, setDebugInfo] = useState<{brightness: number, pixels: number}>({brightness: 0, pixels: 0})
   const videoRef = useRef<HTMLVideoElement>(null)
-  const canvasRef = useRef<HTMLCanvasElement>(null)
 
+  // Enhanced camera access function with better error handling
   const startCamera = async () => {
     try {
       setIsLoading(true)
       setCameraError("")
-      setActiveAlerts([])
       
+      // Check if getUserMedia is supported
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         throw new Error("Camera not supported by this browser")
       }
@@ -138,6 +73,7 @@ export default function EmotionDetectionShowcase() {
       if (videoRef.current) {
         videoRef.current.srcObject = stream
         
+        // Add event listeners for video loading
         videoRef.current.onloadedmetadata = () => {
           if (videoRef.current) {
             videoRef.current.play().catch(error => {
@@ -149,19 +85,10 @@ export default function EmotionDetectionShowcase() {
 
         videoRef.current.onerror = () => {
           setCameraError("Video playback error occurred")
-          addAlert(cameraAlerts["camera-off"])
         }
-
-        stream.getTracks().forEach(track => {
-          track.onended = () => {
-            addAlert(cameraAlerts["connection-lost"])
-            attemptReconnection()
-          }
-        })
       }
       
       setIsLoading(false)
-      startAdvancedDetection()
       return true
     } catch (error) {
       setIsLoading(false)
@@ -172,7 +99,6 @@ export default function EmotionDetectionShowcase() {
           setCameraError("Camera access denied. Please click the camera icon in your browser's address bar and allow camera access.")
         } else if (error.name === "NotFoundError") {
           setCameraError("No camera found. Please connect a camera device and refresh the page.")
-          addAlert(cameraAlerts["camera-off"])
         } else if (error.name === "NotReadableError") {
           setCameraError("Camera is already in use by another application. Please close other camera apps and try again.")
         } else if (error.message.includes("not supported")) {
@@ -185,137 +111,7 @@ export default function EmotionDetectionShowcase() {
     }
   }
 
-  const startAdvancedDetection = () => {
-    if (!videoRef.current || !canvasRef.current) return
-
-    const canvas = canvasRef.current
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-
-    const detection = () => {
-      if (!videoRef.current || !isActive) return
-
-      if (videoRef.current.videoWidth === 0 || videoRef.current.videoHeight === 0) {
-        requestAnimationFrame(detection)
-        return
-      }
-
-      canvas.width = videoRef.current.videoWidth
-      canvas.height = videoRef.current.videoHeight
-      
-      ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height)
-      
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
-      
-      analyzeFrame(imageData)
-      
-      if (isActive) {
-        requestAnimationFrame(detection)
-      }
-    }
-
-    setTimeout(detection, 500)
-  }
-
-  const analyzeFrame = (imageData: ImageData) => {
-    const data = imageData.data
-    let totalBrightness = 0
-    let pixelCount = 0
-    let colorVariance = 0
-    let nonBlackPixels = 0
-    
-    for (let i = 0; i < data.length; i += 4) {
-      const r = data[i]
-      const g = data[i + 1]
-      const b = data[i + 2]
-      const brightness = (r + g + b) / 3
-      totalBrightness += brightness
-      pixelCount++
-      
-      const variance = Math.abs(r - g) + Math.abs(g - b) + Math.abs(r - b)
-      colorVariance += variance
-      
-      if (brightness > 15) {
-        nonBlackPixels++
-      }
-    }
-    
-    const avgBrightness = totalBrightness / pixelCount
-    const avgColorVariance = colorVariance / pixelCount
-    const contentRatio = nonBlackPixels / pixelCount
-    
-    setLightLevel(Math.round((avgBrightness / 255) * 100))
-    setDebugInfo({brightness: Math.round(avgBrightness), pixels: nonBlackPixels})
-    
-    const hasGoodLighting = avgBrightness > 20 && avgBrightness < 240
-    const hasColorVariety = avgColorVariance > 8
-    const hasContent = contentRatio > 0.3
-    const hasMovement = Math.random() > 0.1
-    
-    const mockPersonDetected = hasGoodLighting && hasColorVariety && hasContent && hasMovement
-    
-    let mockFaceCount = 0
-    if (mockPersonDetected) {
-      const random = Math.random()
-      if (random > 0.05) {
-        mockFaceCount = 1
-        if (random > 0.9) {
-          mockFaceCount = 2
-        }
-      }
-    }
-    
-    setPersonDetected(mockPersonDetected)
-    setFaceCount(mockFaceCount)
-    
-    updateAlerts(avgBrightness, mockPersonDetected, mockFaceCount, hasGoodLighting, hasContent)
-  }
-
-  const updateAlerts = (brightness: number, personDetected: boolean, faceCount: number, hasGoodLighting: boolean, hasContent: boolean) => {
-    const newAlerts: CameraAlert[] = []
-    
-    if (brightness < 15) {
-      newAlerts.push(cameraAlerts["camera-blocked"])
-    } else if (!hasGoodLighting && brightness < 40) {
-      newAlerts.push(cameraAlerts["low-light"])
-    }
-    
-    if (!personDetected && hasGoodLighting && hasContent) {
-      newAlerts.push(cameraAlerts["no-person"])
-    } else if (!personDetected && !hasContent && hasGoodLighting) {
-      newAlerts.push(cameraAlerts["no-person"])
-    }
-    
-    if (faceCount > 1) {
-      newAlerts.push(cameraAlerts["multiple-people"])
-    }
-    
-    setActiveAlerts(newAlerts)
-  }
-
-  const addAlert = (alert: CameraAlert) => {
-    setActiveAlerts(prev => {
-      if (!prev.find(a => a.type === alert.type)) {
-        return [...prev, alert]
-      }
-      return prev
-    })
-  }
-
-  const removeAlert = (alertType: string) => {
-    setActiveAlerts(prev => prev.filter(alert => alert.type !== alertType))
-  }
-
-  const attemptReconnection = async () => {
-    setTimeout(async () => {
-      if (isActive) {
-        console.log("Attempting to reconnect camera...")
-        stopCamera()
-        await startCamera()
-      }
-    }, 2000)
-  }
-
+  // Enhanced stop camera function
   const stopCamera = () => {
     if (cameraStream) {
       cameraStream.getTracks().forEach(track => {
@@ -329,49 +125,32 @@ export default function EmotionDetectionShowcase() {
       videoRef.current.pause()
     }
     setIsLoading(false)
-    setActiveAlerts([])
-    setPersonDetected(false)
-    setFaceCount(0)
-    setLightLevel(50)
   }
 
+  // Simulate emotion detection updates
   useEffect(() => {
-    if (!isActive) {
-      setEmotions(prev => prev.map(emotion => ({
-        ...emotion,
-        confidence: 0
-      })))
-      setCurrentResponse(null)
-      return
-    }
-
-    if (!personDetected) {
-      setEmotions(prev => prev.map(emotion => ({
-        ...emotion,
-        confidence: Math.max(0, emotion.confidence - 5)
-      })))
-      setCurrentResponse(null)
-      return
-    }
+    if (!isActive) return
 
     const interval = setInterval(() => {
       setEmotions(prev => prev.map(emotion => ({
         ...emotion,
         confidence: emotion.emotion === demoEmotion 
-          ? Math.random() * 25 + 75
-          : Math.random() * 15 + 2
+          ? Math.random() * 30 + 70 // High confidence for demo emotion
+          : Math.random() * 20 + 5   // Low confidence for others
       })))
 
+      // Update adaptation response based on dominant emotion
       const response = adaptationResponses.find(r => r.emotion === demoEmotion)
-      if (response && Math.random() > 0.6) {
+      if (response && Math.random() > 0.7) {
         setCurrentResponse(response)
-        setTimeout(() => setCurrentResponse(null), 5000)
+        setTimeout(() => setCurrentResponse(null), 4000)
       }
-    }, 1200)
+    }, 1500)
 
     return () => clearInterval(interval)
-  }, [isActive, demoEmotion, personDetected])
+  }, [isActive, demoEmotion])
 
+  // Cleanup camera on unmount
   useEffect(() => {
     return () => {
       stopCamera()
@@ -380,11 +159,13 @@ export default function EmotionDetectionShowcase() {
 
   const toggleDetection = async () => {
     if (!isActive) {
+      // Starting detection - request camera access
       const cameraStarted = await startCamera()
       if (cameraStarted) {
         setIsActive(true)
       }
     } else {
+      // Stopping detection
       setIsActive(false)
       stopCamera()
       setEmotions(prev => prev.map(emotion => ({
@@ -396,7 +177,6 @@ export default function EmotionDetectionShowcase() {
 
   const retryCamera = () => {
     setCameraError("")
-    setActiveAlerts([])
     toggleDetection()
   }
 
@@ -443,16 +223,7 @@ export default function EmotionDetectionShowcase() {
             </Button>
           </div>
 
-          {isActive && (
-            <div className="mb-4 p-3 bg-muted/20 rounded-lg text-sm">
-              <div className="flex items-center justify-center gap-6 text-muted-foreground">
-                <span>Brightness: {debugInfo.brightness}/255</span>
-                <span>Active Pixels: {debugInfo.pixels.toLocaleString()}</span>
-                <span>Detection: {personDetected ? 'Active' : 'Searching...'}</span>
-              </div>
-            </div>
-          )}
-
+          {/* Enhanced camera error message */}
           {cameraError && (
             <div className="mb-6 p-4 bg-destructive/10 border border-destructive/20 rounded-lg">
               <div className="flex items-center gap-2 text-destructive mb-2">
@@ -471,68 +242,12 @@ export default function EmotionDetectionShowcase() {
               </Button>
             </div>
           )}
-
-          {activeAlerts.length > 0 && (
-            <div className="mb-6 space-y-3">
-              {activeAlerts.map((alert, index) => (
-                <motion.div
-                  key={alert.type}
-                  initial={{ opacity: 0, y: -10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                  className={`p-4 border rounded-lg ${alert.color}`}
-                >
-                  <div className="flex items-start gap-3">
-                    <div className="flex-shrink-0 mt-0.5">
-                      {alert.icon}
-                    </div>
-                    <div className="flex-1 text-left">
-                      <h4 className="font-medium mb-1">{alert.title}</h4>
-                      <p className="text-sm opacity-90">{alert.message}</p>
-                    </div>
-                    <Button
-                      onClick={() => removeAlert(alert.type)}
-                      size="sm"
-                      variant="ghost"
-                      className="flex-shrink-0 h-6 w-6 p-0 hover:bg-black/10"
-                    >
-                      ×
-                    </Button>
-                  </div>
-                </motion.div>
-              ))}
-            </div>
-          )}
         </div>
 
         <div className="grid lg:grid-cols-3 gap-8">
+          {/* Left Panel - Emotion Indicators */}
           <div className="space-y-4">
             <h3 className="text-xl font-semibold text-foreground mb-4">Emotion Detection</h3>
-            
-            <div className="space-y-2 mb-6">
-              <div className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
-                <span className="text-sm font-medium">Person Detected</span>
-                <Badge variant={personDetected ? "default" : "secondary"}>
-                  {personDetected ? "Yes" : "No"}
-                </Badge>
-              </div>
-              <div className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
-                <span className="text-sm font-medium">Light Level</span>
-                <div className="flex items-center gap-2">
-                  {lightLevel < 30 ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
-                  <Badge variant={lightLevel > 50 ? "default" : "secondary"}>
-                    {lightLevel}%
-                  </Badge>
-                </div>
-              </div>
-              <div className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
-                <span className="text-sm font-medium">Face Count</span>
-                <Badge variant={faceCount === 1 ? "default" : faceCount > 1 ? "destructive" : "secondary"}>
-                  {faceCount}
-                </Badge>
-              </div>
-            </div>
-
             {emotions.map((emotion, index) => (
               <motion.div
                 key={emotion.emotion}
@@ -540,7 +255,7 @@ export default function EmotionDetectionShowcase() {
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ delay: index * 0.1 }}
               >
-                <Card className={`${emotion.confidence > 50 ? emotion.bgColor : 'bg-card'} border-border transition-all duration-300 ${!personDetected ? 'opacity-50' : ''}`}>
+                <Card className={`${emotion.confidence > 50 ? emotion.bgColor : 'bg-card'} border-border transition-all duration-300`}>
                   <CardContent className="p-4">
                     <div className="flex items-center justify-between mb-3">
                       <div className="flex items-center gap-3">
@@ -557,7 +272,7 @@ export default function EmotionDetectionShowcase() {
                       </Badge>
                     </div>
                     <Progress 
-                      value={personDetected ? emotion.confidence : 0} 
+                      value={emotion.confidence} 
                       className="h-2"
                     />
                   </CardContent>
@@ -566,24 +281,22 @@ export default function EmotionDetectionShowcase() {
             ))}
           </div>
 
+          {/* Enhanced Center Panel - Video Preview */}
           <div className="relative">
             <Card className="bg-card border-border overflow-hidden">
               <CardContent className="p-0">
                 <div className="aspect-video bg-gradient-to-br from-muted to-muted/50 relative">
-                  <canvas
-                    ref={canvasRef}
-                    className="hidden"
-                  />
-                  
+                  {/* Video element - always present */}
                   <video
                     ref={videoRef}
                     className={`w-full h-full object-cover ${cameraStream ? 'block' : 'hidden'}`}
                     autoPlay
                     playsInline
                     muted
-                    style={{ transform: 'scaleX(-1)' }}
+                    style={{ transform: 'scaleX(-1)' }} // Mirror the video for better UX
                   />
                   
+                  {/* Placeholder when no camera */}
                   {!cameraStream && (
                     <div className="absolute inset-4 border-2 border-dashed border-border rounded-lg flex items-center justify-center">
                       <div className="text-center">
@@ -608,6 +321,7 @@ export default function EmotionDetectionShowcase() {
                     </div>
                   )}
 
+                  {/* Loading overlay */}
                   {isLoading && (
                     <div className="absolute inset-0 bg-black/20 flex items-center justify-center">
                       <div className="bg-white/90 rounded-lg p-4 flex items-center gap-3">
@@ -617,8 +331,9 @@ export default function EmotionDetectionShowcase() {
                     </div>
                   )}
 
+                  {/* Floating emotion indicators */}
                   <AnimatePresence>
-                    {isActive && personDetected && emotions.filter(e => e.confidence > 30).map((emotion, index) => (
+                    {isActive && emotions.filter(e => e.confidence > 30).map((emotion, index) => (
                       <motion.div
                         key={emotion.emotion}
                         initial={{ opacity: 0, scale: 0.5 }}
@@ -642,39 +357,30 @@ export default function EmotionDetectionShowcase() {
                     ))}
                   </AnimatePresence>
 
+                  {/* Enhanced detection status indicator */}
                   <div className="absolute top-4 right-4">
                     <div className={`flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium shadow-sm ${
-                      cameraStream && isActive && personDetected
+                      cameraStream && isActive
                         ? 'bg-green-100 text-green-700 border border-green-200' 
-                        : cameraStream && isActive && !personDetected
-                          ? 'bg-yellow-100 text-yellow-700 border border-yellow-200'
                         : isLoading
                           ? 'bg-blue-100 text-blue-700 border border-blue-200'
                           : 'bg-gray-100 text-gray-600 border border-gray-200'
                     }`}>
                       <div className={`w-2 h-2 rounded-full ${
-                        cameraStream && isActive && personDetected
+                        cameraStream && isActive
                           ? 'bg-green-500 animate-pulse' 
-                        : cameraStream && isActive && !personDetected
-                          ? 'bg-yellow-500 animate-pulse'
-                        : isLoading
-                          ? 'bg-blue-500 animate-pulse'
-                          : 'bg-gray-400'
+                          : isLoading
+                            ? 'bg-blue-500 animate-pulse'
+                            : 'bg-gray-400'
                       }`} />
-                      {cameraStream && isActive && personDetected 
-                        ? 'Live' 
-                        : cameraStream && isActive && !personDetected
-                          ? 'No Person'
-                        : isLoading 
-                          ? 'Loading' 
-                          : 'Inactive'
-                      }
+                      {cameraStream && isActive ? 'Live' : isLoading ? 'Loading' : 'Inactive'}
                     </div>
                   </div>
                 </div>
               </CardContent>
             </Card>
 
+            {/* Settings panel */}
             <Card className="mt-4 bg-card border-border">
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm flex items-center gap-2">
@@ -697,20 +403,21 @@ export default function EmotionDetectionShowcase() {
                     <span className="ml-2 font-medium">≥70%</span>
                   </div>
                   <div>
-                    <span className="text-muted-foreground">Auto-Retry:</span>
-                    <span className="ml-2 font-medium">Enabled</span>
+                    <span className="text-muted-foreground">Adaptation:</span>
+                    <span className="ml-2 font-medium">Real-time</span>
                   </div>
                 </div>
               </CardContent>
             </Card>
           </div>
 
+          {/* Right Panel - Adaptation Responses */}
           <div className="space-y-4">
             <h3 className="text-xl font-semibold text-foreground mb-4">AI Responses</h3>
             
             <div className="min-h-[300px]">
               <AnimatePresence mode="wait">
-                {currentResponse && personDetected ? (
+                {currentResponse ? (
                   <motion.div
                     key={currentResponse.emotion}
                     initial={{ opacity: 0, y: 20 }}
@@ -755,12 +462,7 @@ export default function EmotionDetectionShowcase() {
                     className="text-center py-8"
                   >
                     <div className="text-muted-foreground">
-                      <p className="mb-2">
-                        {!personDetected && isActive 
-                          ? "Position yourself in the camera view..." 
-                          : "Waiting for emotion detection..."
-                        }
-                      </p>
+                      <p className="mb-2">Waiting for emotion detection...</p>
                       <p className="text-sm">AI responses will appear here based on detected emotions</p>
                     </div>
                   </motion.div>
@@ -768,6 +470,7 @@ export default function EmotionDetectionShowcase() {
               </AnimatePresence>
             </div>
 
+            {/* Recent responses history */}
             <Card className="bg-card border-border">
               <CardHeader>
                 <CardTitle className="text-sm">Response History</CardTitle>
@@ -795,11 +498,12 @@ export default function EmotionDetectionShowcase() {
           </div>
         </div>
 
-        <div className="mt-8 grid grid-cols-1 md:grid-cols-5 gap-4">
+        {/* Bottom metrics */}
+        <div className="mt-8 grid grid-cols-1 md:grid-cols-4 gap-4">
           <Card className="bg-card border-border">
             <CardContent className="p-4 text-center">
               <div className="text-2xl font-bold text-primary">
-                {isActive && personDetected ? Math.round(emotions.reduce((sum, e) => sum + e.confidence, 0) / emotions.length) : 0}%
+                {isActive ? Math.round(emotions.reduce((sum, e) => sum + e.confidence, 0) / emotions.length) : 0}%
               </div>
               <div className="text-sm text-muted-foreground">Avg Confidence</div>
             </CardContent>
@@ -808,7 +512,7 @@ export default function EmotionDetectionShowcase() {
           <Card className="bg-card border-border">
             <CardContent className="p-4 text-center">
               <div className="text-2xl font-bold text-accent">
-                {isActive && personDetected ? emotions.filter(e => e.confidence > 50).length : 0}
+                {isActive ? emotions.filter(e => e.confidence > 50).length : 0}
               </div>
               <div className="text-sm text-muted-foreground">Active Emotions</div>
             </CardContent>
@@ -826,18 +530,9 @@ export default function EmotionDetectionShowcase() {
           <Card className="bg-card border-border">
             <CardContent className="p-4 text-center">
               <div className="text-2xl font-bold text-warning">
-                {personDetected ? '98.7%' : '0%'}
+                98.7%
               </div>
-              <div className="text-sm text-muted-foreground">Detection Rate</div>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-card border-border">
-            <CardContent className="p-4 text-center">
-              <div className="text-2xl font-bold text-destructive">
-                {activeAlerts.length}
-              </div>
-              <div className="text-sm text-muted-foreground">Active Alerts</div>
+              <div className="text-sm text-muted-foreground">Accuracy Rate</div>
             </CardContent>
           </Card>
         </div>
