@@ -110,17 +110,16 @@ export default function EmotionDetectionShowcase() {
   const [personDetected, setPersonDetected] = useState<boolean>(false)
   const [lightLevel, setLightLevel] = useState<number>(50)
   const [faceCount, setFaceCount] = useState<number>(0)
+  const [debugInfo, setDebugInfo] = useState<{brightness: number, pixels: number}>({brightness: 0, pixels: 0})
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
-  // Enhanced camera access function with better error handling
   const startCamera = async () => {
     try {
       setIsLoading(true)
       setCameraError("")
       setActiveAlerts([])
       
-      // Check if getUserMedia is supported
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         throw new Error("Camera not supported by this browser")
       }
@@ -139,7 +138,6 @@ export default function EmotionDetectionShowcase() {
       if (videoRef.current) {
         videoRef.current.srcObject = stream
         
-        // Add event listeners for video loading
         videoRef.current.onloadedmetadata = () => {
           if (videoRef.current) {
             videoRef.current.play().catch(error => {
@@ -154,7 +152,6 @@ export default function EmotionDetectionShowcase() {
           addAlert(cameraAlerts["camera-off"])
         }
 
-        // Monitor stream for disconnection
         stream.getTracks().forEach(track => {
           track.onended = () => {
             addAlert(cameraAlerts["connection-lost"])
@@ -188,7 +185,6 @@ export default function EmotionDetectionShowcase() {
     }
   }
 
-  // Advanced detection functions
   const startAdvancedDetection = () => {
     if (!videoRef.current || !canvasRef.current) return
 
@@ -199,33 +195,35 @@ export default function EmotionDetectionShowcase() {
     const detection = () => {
       if (!videoRef.current || !isActive) return
 
+      if (videoRef.current.videoWidth === 0 || videoRef.current.videoHeight === 0) {
+        requestAnimationFrame(detection)
+        return
+      }
+
       canvas.width = videoRef.current.videoWidth
       canvas.height = videoRef.current.videoHeight
       
-      // Draw current video frame to canvas
       ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height)
       
-      // Get image data for analysis
       const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
       
-      // Analyze frame
       analyzeFrame(imageData)
       
-      // Continue detection
       if (isActive) {
         requestAnimationFrame(detection)
       }
     }
 
-    detection()
+    setTimeout(detection, 500)
   }
 
   const analyzeFrame = (imageData: ImageData) => {
     const data = imageData.data
     let totalBrightness = 0
     let pixelCount = 0
+    let colorVariance = 0
+    let nonBlackPixels = 0
     
-    // Calculate average brightness to detect low light or camera blocked
     for (let i = 0; i < data.length; i += 4) {
       const r = data[i]
       const g = data[i + 1]
@@ -233,33 +231,58 @@ export default function EmotionDetectionShowcase() {
       const brightness = (r + g + b) / 3
       totalBrightness += brightness
       pixelCount++
+      
+      const variance = Math.abs(r - g) + Math.abs(g - b) + Math.abs(r - b)
+      colorVariance += variance
+      
+      if (brightness > 15) {
+        nonBlackPixels++
+      }
     }
     
     const avgBrightness = totalBrightness / pixelCount
-    setLightLevel(Math.round((avgBrightness / 255) * 100))
+    const avgColorVariance = colorVariance / pixelCount
+    const contentRatio = nonBlackPixels / pixelCount
     
-    // Simulate person detection (in real implementation, use face detection library)
-    const mockPersonDetected = avgBrightness > 10 && Math.random() > 0.3
-    const mockFaceCount = mockPersonDetected ? (Math.random() > 0.8 ? 2 : 1) : 0
+    setLightLevel(Math.round((avgBrightness / 255) * 100))
+    setDebugInfo({brightness: Math.round(avgBrightness), pixels: nonBlackPixels})
+    
+    const hasGoodLighting = avgBrightness > 20 && avgBrightness < 240
+    const hasColorVariety = avgColorVariance > 8
+    const hasContent = contentRatio > 0.3
+    const hasMovement = Math.random() > 0.1
+    
+    const mockPersonDetected = hasGoodLighting && hasColorVariety && hasContent && hasMovement
+    
+    let mockFaceCount = 0
+    if (mockPersonDetected) {
+      const random = Math.random()
+      if (random > 0.05) {
+        mockFaceCount = 1
+        if (random > 0.9) {
+          mockFaceCount = 2
+        }
+      }
+    }
     
     setPersonDetected(mockPersonDetected)
     setFaceCount(mockFaceCount)
     
-    // Update alerts based on analysis
-    updateAlerts(avgBrightness, mockPersonDetected, mockFaceCount)
+    updateAlerts(avgBrightness, mockPersonDetected, mockFaceCount, hasGoodLighting, hasContent)
   }
 
-  const updateAlerts = (brightness: number, personDetected: boolean, faceCount: number) => {
+  const updateAlerts = (brightness: number, personDetected: boolean, faceCount: number, hasGoodLighting: boolean, hasContent: boolean) => {
     const newAlerts: CameraAlert[] = []
     
-    // Check for various conditions
-    if (brightness < 20) {
+    if (brightness < 15) {
       newAlerts.push(cameraAlerts["camera-blocked"])
-    } else if (brightness < 50) {
+    } else if (!hasGoodLighting && brightness < 40) {
       newAlerts.push(cameraAlerts["low-light"])
     }
     
-    if (!personDetected && brightness > 20) {
+    if (!personDetected && hasGoodLighting && hasContent) {
+      newAlerts.push(cameraAlerts["no-person"])
+    } else if (!personDetected && !hasContent && hasGoodLighting) {
       newAlerts.push(cameraAlerts["no-person"])
     }
     
@@ -293,7 +316,6 @@ export default function EmotionDetectionShowcase() {
     }, 2000)
   }
 
-  // Enhanced stop camera function
   const stopCamera = () => {
     if (cameraStream) {
       cameraStream.getTracks().forEach(track => {
@@ -313,14 +335,22 @@ export default function EmotionDetectionShowcase() {
     setLightLevel(50)
   }
 
-  // Simulate emotion detection updates
   useEffect(() => {
-    if (!isActive || !personDetected) {
-      // Reset emotions if no person detected
+    if (!isActive) {
       setEmotions(prev => prev.map(emotion => ({
         ...emotion,
         confidence: 0
       })))
+      setCurrentResponse(null)
+      return
+    }
+
+    if (!personDetected) {
+      setEmotions(prev => prev.map(emotion => ({
+        ...emotion,
+        confidence: Math.max(0, emotion.confidence - 5)
+      })))
+      setCurrentResponse(null)
       return
     }
 
@@ -328,22 +358,20 @@ export default function EmotionDetectionShowcase() {
       setEmotions(prev => prev.map(emotion => ({
         ...emotion,
         confidence: emotion.emotion === demoEmotion 
-          ? Math.random() * 30 + 70 // High confidence for demo emotion
-          : Math.random() * 20 + 5   // Low confidence for others
+          ? Math.random() * 25 + 75
+          : Math.random() * 15 + 2
       })))
 
-      // Update adaptation response based on dominant emotion
       const response = adaptationResponses.find(r => r.emotion === demoEmotion)
-      if (response && Math.random() > 0.7) {
+      if (response && Math.random() > 0.6) {
         setCurrentResponse(response)
-        setTimeout(() => setCurrentResponse(null), 4000)
+        setTimeout(() => setCurrentResponse(null), 5000)
       }
-    }, 1500)
+    }, 1200)
 
     return () => clearInterval(interval)
   }, [isActive, demoEmotion, personDetected])
 
-  // Cleanup camera on unmount
   useEffect(() => {
     return () => {
       stopCamera()
@@ -352,13 +380,11 @@ export default function EmotionDetectionShowcase() {
 
   const toggleDetection = async () => {
     if (!isActive) {
-      // Starting detection - request camera access
       const cameraStarted = await startCamera()
       if (cameraStarted) {
         setIsActive(true)
       }
     } else {
-      // Stopping detection
       setIsActive(false)
       stopCamera()
       setEmotions(prev => prev.map(emotion => ({
@@ -417,7 +443,16 @@ export default function EmotionDetectionShowcase() {
             </Button>
           </div>
 
-          {/* Enhanced camera error message */}
+          {isActive && (
+            <div className="mb-4 p-3 bg-muted/20 rounded-lg text-sm">
+              <div className="flex items-center justify-center gap-6 text-muted-foreground">
+                <span>Brightness: {debugInfo.brightness}/255</span>
+                <span>Active Pixels: {debugInfo.pixels.toLocaleString()}</span>
+                <span>Detection: {personDetected ? 'Active' : 'Searching...'}</span>
+              </div>
+            </div>
+          )}
+
           {cameraError && (
             <div className="mb-6 p-4 bg-destructive/10 border border-destructive/20 rounded-lg">
               <div className="flex items-center gap-2 text-destructive mb-2">
@@ -437,7 +472,6 @@ export default function EmotionDetectionShowcase() {
             </div>
           )}
 
-          {/* Advanced alerts system */}
           {activeAlerts.length > 0 && (
             <div className="mb-6 space-y-3">
               {activeAlerts.map((alert, index) => (
@@ -472,11 +506,9 @@ export default function EmotionDetectionShowcase() {
         </div>
 
         <div className="grid lg:grid-cols-3 gap-8">
-          {/* Left Panel - Emotion Indicators */}
           <div className="space-y-4">
             <h3 className="text-xl font-semibold text-foreground mb-4">Emotion Detection</h3>
             
-            {/* Detection status indicators */}
             <div className="space-y-2 mb-6">
               <div className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
                 <span className="text-sm font-medium">Person Detected</span>
@@ -534,28 +566,24 @@ export default function EmotionDetectionShowcase() {
             ))}
           </div>
 
-          {/* Enhanced Center Panel - Video Preview */}
           <div className="relative">
             <Card className="bg-card border-border overflow-hidden">
               <CardContent className="p-0">
                 <div className="aspect-video bg-gradient-to-br from-muted to-muted/50 relative">
-                  {/* Hidden canvas for frame analysis */}
                   <canvas
                     ref={canvasRef}
                     className="hidden"
                   />
                   
-                  {/* Video element - always present */}
                   <video
                     ref={videoRef}
                     className={`w-full h-full object-cover ${cameraStream ? 'block' : 'hidden'}`}
                     autoPlay
                     playsInline
                     muted
-                    style={{ transform: 'scaleX(-1)' }} // Mirror the video for better UX
+                    style={{ transform: 'scaleX(-1)' }}
                   />
                   
-                  {/* Placeholder when no camera */}
                   {!cameraStream && (
                     <div className="absolute inset-4 border-2 border-dashed border-border rounded-lg flex items-center justify-center">
                       <div className="text-center">
@@ -580,7 +608,6 @@ export default function EmotionDetectionShowcase() {
                     </div>
                   )}
 
-                  {/* Loading overlay */}
                   {isLoading && (
                     <div className="absolute inset-0 bg-black/20 flex items-center justify-center">
                       <div className="bg-white/90 rounded-lg p-4 flex items-center gap-3">
@@ -590,7 +617,6 @@ export default function EmotionDetectionShowcase() {
                     </div>
                   )}
 
-                  {/* Floating emotion indicators */}
                   <AnimatePresence>
                     {isActive && personDetected && emotions.filter(e => e.confidence > 30).map((emotion, index) => (
                       <motion.div
@@ -616,7 +642,6 @@ export default function EmotionDetectionShowcase() {
                     ))}
                   </AnimatePresence>
 
-                  {/* Enhanced detection status indicator */}
                   <div className="absolute top-4 right-4">
                     <div className={`flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium shadow-sm ${
                       cameraStream && isActive && personDetected
@@ -650,7 +675,6 @@ export default function EmotionDetectionShowcase() {
               </CardContent>
             </Card>
 
-            {/* Enhanced settings panel */}
             <Card className="mt-4 bg-card border-border">
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm flex items-center gap-2">
@@ -681,7 +705,6 @@ export default function EmotionDetectionShowcase() {
             </Card>
           </div>
 
-          {/* Right Panel - Adaptation Responses */}
           <div className="space-y-4">
             <h3 className="text-xl font-semibold text-foreground mb-4">AI Responses</h3>
             
@@ -745,7 +768,6 @@ export default function EmotionDetectionShowcase() {
               </AnimatePresence>
             </div>
 
-            {/* Recent responses history */}
             <Card className="bg-card border-border">
               <CardHeader>
                 <CardTitle className="text-sm">Response History</CardTitle>
@@ -773,7 +795,6 @@ export default function EmotionDetectionShowcase() {
           </div>
         </div>
 
-        {/* Enhanced bottom metrics */}
         <div className="mt-8 grid grid-cols-1 md:grid-cols-5 gap-4">
           <Card className="bg-card border-border">
             <CardContent className="p-4 text-center">
